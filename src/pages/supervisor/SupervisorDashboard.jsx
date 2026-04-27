@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useAuth } from '../../context/AuthContext'
 import BottomNav from '../../components/BottomNav'
 import { suscribirServiciosHoy, obtenerTecnicos } from '../../firebase/firestore'
+import AdminPanel from './AdminPanel'
 
 /* ── Icons ── */
 const IconChart = () => (
@@ -23,11 +24,20 @@ const IconStar = () => (
     <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
   </svg>
 )
+const IconAdmin = () => (
+  <svg viewBox="0 0 24 24">
+    <circle cx="12" cy="8" r="4" />
+    <path d="M4 20c0-4 3.6-7 8-7s8 3 8 7" />
+    <line x1="18" y1="2" x2="18" y2="8" />
+    <line x1="15" y1="5" x2="21" y2="5" />
+  </svg>
+)
 
 const TABS = [
   { id: 'resumen',    label: 'Resumen',    icon: <IconChart /> },
   { id: 'rutas',      label: 'Rutas',      icon: <IconRoutes /> },
   { id: 'eficiencia', label: 'Eficiencia', icon: <IconStar /> },
+  { id: 'admin',      label: 'Admin',      icon: <IconAdmin /> },
 ]
 
 function fechaHoy() {
@@ -227,6 +237,9 @@ export default function SupervisorDashboard() {
             )}
           </>
         )}
+
+        {/* ── ADMIN ── */}
+        {tab === 'admin' && <AdminPanel />}
 
         {/* ── EFICIENCIA ── */}
         {tab === 'eficiencia' && (
