@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useAuth } from '../../context/AuthContext'
 import BottomNav from '../../components/BottomNav'
+import { obtenerUsuario, obtenerUltimaMedicion } from '../../firebase/firestore'
 
 /* ── Icons ── */
 const IconWaves = () => (
@@ -28,39 +29,85 @@ const TABS = [
   { id: 'historial', label: 'Historial', icon: <IconClock /> },
 ]
 
-const METRICS = [
-  { key: 'ph',    label: 'pH',          value: '7.4',  unit: '',    color: 'var(--green)' },
-  { key: 'cloro', label: 'Cloro libre', value: '1.8',  unit: 'ppm', color: 'var(--green)' },
-  { key: 'temp',  label: 'Temperatura', value: '27',   unit: '°C',  color: 'var(--accent)' },
-  { key: 'tds',   label: 'TDS',         value: '420',  unit: 'ppm', color: 'var(--amber)' },
-]
+/* Rangos óptimos para color coding */
+function colorMetrica(key, val) {
+  const v = parseFloat(val)
+  if (isNaN(v)) return 'var(--muted)'
+  if (key === 'ph')    return v >= 7.2 && v <= 7.6 ? 'var(--green)' : v >= 7.0 && v <= 7.8 ? 'var(--amber)' : 'var(--red)'
+  if (key === 'cloro') return v >= 1.0 && v <= 3.0 ? 'var(--green)' : v >= 0.5 && v <= 5.0 ? 'var(--amber)' : 'var(--red)'
+  if (key === 'tds')   return v < 400 ? 'var(--green)' : v <= 600 ? 'var(--amber)' : 'var(--red)'
+  return 'var(--accent)'
+}
 
-const NOTIFS = [
-  { id: 1, tipo: 'green', msg: 'Servicio completado hoy a las 10:30 am',     time: 'Hace 2 h' },
-  { id: 2, tipo: 'amber', msg: 'Nivel de TDS ligeramente elevado (420 ppm)', time: 'Hace 1 d' },
-  { id: 3, tipo: 'blue',  msg: 'Próximo servicio: Jue 30 Abr · 10:00 am',   time: 'Hace 2 d' },
-  { id: 4, tipo: 'green', msg: 'Balance de agua normalizado',                 time: 'Hace 3 d' },
-]
+function estadoGeneral(medicion) {
+  if (!medicion) return null
+  const { ph, cloro, tds } = medicion
+  if (
+    colorMetrica('ph', ph) === 'var(--red)' ||
+    colorMetrica('cloro', cloro) === 'var(--red)'
+  ) return { label: '⚠ Atención', cls: 'badge-red' }
+  if (
+    colorMetrica('ph', ph) === 'var(--amber)' ||
+    colorMetrica('cloro', cloro) === 'var(--amber)' ||
+    colorMetrica('tds', tds) === 'var(--amber)'
+  ) return { label: '● Revisar', cls: 'badge-amber' }
+  return { label: '● Óptimo', cls: 'badge-green' }
+}
 
-const HISTORIAL = [
-  { id: 1, fecha: '23 Abr 2026', tecnico: 'Carlos V.',  notas: 'Limpieza general + balance de agua', status: 'green' },
-  { id: 2, fecha: '16 Abr 2026', tecnico: 'Carlos V.',  notas: 'Tratamiento preventivo de algas',    status: 'amber' },
-  { id: 3, fecha: '09 Abr 2026', tecnico: 'Martín R.',  notas: 'Servicio de rutina completo',        status: 'green' },
-  { id: 4, fecha: '02 Abr 2026', tecnico: 'Carlos V.',  notas: 'Revisión de bomba y filtros',        status: 'green' },
-]
+function fmtTimestamp(ts) {
+  if (!ts) return '—'
+  const d = ts.toDate ? ts.toDate() : new Date(ts)
+  return d.toLocaleString('es-MX', { dateStyle: 'medium', timeStyle: 'short' })
+}
 
 export default function ClienteDashboard() {
-  const [tab, setTab] = useState('alberca')
-  const { user, logout } = useAuth()
-  const initials = (user?.email ?? 'CL').slice(0, 2).toUpperCase()
+  const [tab, setTab]           = useState('alberca')
+  const [userData, setUserData] = useState(null)
+  const [medicion, setMedicion] = useState(null)
+  const [loading, setLoading]   = useState(true)
+  const [error, setError]       = useState(null)
+  const { user, logout }        = useAuth()
+
+  useEffect(() => {
+    if (!user?.uid) return
+
+    async function cargar() {
+      try {
+        // 1. Leer documento del usuario para obtener albercaId
+        const datos = await obtenerUsuario(user.uid)
+        setUserData(datos)
+
+        // 2. Si tiene alberca asignada, cargar última medición
+        if (datos?.albercaId) {
+          const ultima = await obtenerUltimaMedicion(datos.albercaId)
+          setMedicion(ultima)
+        }
+      } catch (e) {
+        setError(e.message)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    cargar()
+  }, [user?.uid])
+
+  const initials = (userData?.nombre ?? user?.email ?? 'CL').slice(0, 2).toUpperCase()
+  const estado   = estadoGeneral(medicion)
+
+  const METRICAS = [
+    { key: 'ph',    label: 'pH',          value: medicion?.ph,          unit: ''    },
+    { key: 'cloro', label: 'Cloro libre', value: medicion?.cloro,       unit: 'ppm' },
+    { key: 'temp',  label: 'Temperatura', value: medicion?.temperatura,  unit: '°C'  },
+    { key: 'tds',   label: 'TDS',         value: medicion?.tds,          unit: 'ppm' },
+  ]
 
   return (
     <div className="screen">
-      {/* Top bar */}
       <header className="top-bar">
         <div>
           <div className="top-bar-title">Mi Alberca</div>
-          <div className="top-bar-sub">{user?.email}</div>
+          <div className="top-bar-sub">{userData?.nombre ?? user?.email}</div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <div className="avatar">{initials}</div>
@@ -70,93 +117,92 @@ export default function ClienteDashboard() {
 
       <div className="page-content">
 
+        {loading && (
+          <div style={{ textAlign: 'center', color: 'var(--muted)', padding: '40px 0', fontSize: 13 }}>
+            Cargando datos...
+          </div>
+        )}
+
+        {error && (
+          <div className="login-error">{error}</div>
+        )}
+
         {/* ── ALBERCA ── */}
-        {tab === 'alberca' && (
+        {!loading && tab === 'alberca' && (
           <>
-            <div className="card">
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-                <span className="card-title" style={{ marginBottom: 0 }}>Estado actual</span>
-                <span className="badge badge-green">● Óptimo</span>
+            {!userData?.albercaId ? (
+              <div className="card" style={{ textAlign: 'center', padding: '32px 16px' }}>
+                <div style={{ fontSize: 32, marginBottom: 10 }}>🏊</div>
+                <div style={{ fontWeight: 600, marginBottom: 6 }}>Sin alberca asignada</div>
+                <div style={{ fontSize: 13, color: 'var(--muted)' }}>
+                  Contacta a tu supervisor para que vincule tu cuenta.
+                </div>
               </div>
-              <div className="metric-grid">
-                {METRICS.map((m) => (
-                  <div key={m.key} className="metric-card">
-                    <div className="metric-value" style={{ color: m.color }}>
-                      {m.value}
-                      <span className="metric-unit">{m.unit}</span>
-                    </div>
-                    <div className="metric-label">{m.label}</div>
+            ) : (
+              <>
+                <div className="card">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+                    <span className="card-title" style={{ marginBottom: 0 }}>Estado actual</span>
+                    {estado && <span className={`badge ${estado.cls}`}>{estado.label}</span>}
                   </div>
-                ))}
-              </div>
-              <div style={{ fontSize: 12, color: 'var(--muted)', textAlign: 'center', marginTop: 10 }}>
-                Última medición: hoy 10:30 am
-              </div>
-            </div>
 
-            <div className="section-title" style={{ marginTop: 8 }}>Próximo servicio</div>
-            <div className="list-item">
-              <div className="list-item-left">
-                <div>
-                  <div className="list-item-title">Jueves 30 Abr · 10:00 am</div>
-                  <div className="list-item-sub">Técnico asignado: Carlos V.</div>
+                  {!medicion ? (
+                    <div style={{ textAlign: 'center', color: 'var(--muted)', padding: '16px 0', fontSize: 13 }}>
+                      Sin mediciones registradas aún.
+                    </div>
+                  ) : (
+                    <>
+                      <div className="metric-grid">
+                        {METRICAS.map((m) => (
+                          <div key={m.key} className="metric-card">
+                            <div className="metric-value" style={{ color: colorMetrica(m.key, m.value) }}>
+                              {m.value ?? '—'}
+                              <span className="metric-unit">{m.unit}</span>
+                            </div>
+                            <div className="metric-label">{m.label}</div>
+                          </div>
+                        ))}
+                      </div>
+                      <div style={{ fontSize: 12, color: 'var(--muted)', textAlign: 'center', marginTop: 10 }}>
+                        Última medición: {fmtTimestamp(medicion.timestamp)}
+                      </div>
+                    </>
+                  )}
                 </div>
-              </div>
-              <span className="badge badge-blue">Programado</span>
-            </div>
 
-            <div className="section-title" style={{ marginTop: 8 }}>Mi alberca</div>
-            <div className="card" style={{ marginBottom: 0 }}>
-              {[
-                ['Tipo', 'Residencial exterior'],
-                ['Volumen', '85,000 L'],
-                ['Sistema', 'Sal electrolítica'],
-                ['Contrato', 'Mantenimiento mensual'],
-              ].map(([k, v]) => (
-                <div key={k} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
-                  <span style={{ fontSize: 13, color: 'var(--muted)' }}>{k}</span>
-                  <span style={{ fontSize: 13, fontWeight: 500 }}>{v}</span>
+                <div className="section-title" style={{ marginTop: 8 }}>Mi alberca</div>
+                <div className="card" style={{ marginBottom: 0 }}>
+                  {[
+                    ['ID alberca', userData.albercaId],
+                    ['Tipo',       userData.tipoAlberca  ?? 'Residencial'],
+                    ['Sistema',    userData.sistemaAgua  ?? '—'],
+                    ['Contrato',   userData.contrato     ?? '—'],
+                  ].map(([k, v]) => (
+                    <div key={k} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
+                      <span style={{ fontSize: 13, color: 'var(--muted)' }}>{k}</span>
+                      <span style={{ fontSize: 13, fontWeight: 500 }}>{v}</span>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
+              </>
+            )}
           </>
         )}
 
         {/* ── NOTIF ── */}
-        {tab === 'notif' && (
-          <>
-            <div className="section-title">Notificaciones recientes</div>
-            {NOTIFS.map((n) => (
-              <div key={n.id} className="list-item">
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div className="list-item-title" style={{ fontSize: 13 }}>{n.msg}</div>
-                  <div className="list-item-sub">{n.time}</div>
-                </div>
-                <span className={`badge badge-${n.tipo}`}>
-                  {n.tipo === 'green' ? 'OK' : n.tipo === 'amber' ? 'Aviso' : 'Info'}
-                </span>
-              </div>
-            ))}
-          </>
+        {!loading && tab === 'notif' && (
+          <div style={{ textAlign: 'center', color: 'var(--muted)', padding: '40px 0' }}>
+            <div style={{ fontSize: 28, marginBottom: 8 }}>🔔</div>
+            <div style={{ fontSize: 13 }}>Las notificaciones se mostrarán aquí.</div>
+          </div>
         )}
 
         {/* ── HISTORIAL ── */}
-        {tab === 'historial' && (
-          <>
-            <div className="section-title">Servicios anteriores</div>
-            {HISTORIAL.map((h) => (
-              <div key={h.id} className="card" style={{ marginBottom: 10 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
-                  <div style={{ fontFamily: 'var(--font-heading)', fontWeight: 600, fontSize: 14 }}>{h.fecha}</div>
-                  <span className={`badge badge-${h.status}`}>
-                    {h.status === 'green' ? 'Completado' : 'Con observación'}
-                  </span>
-                </div>
-                <div style={{ fontSize: 12, color: 'var(--muted)' }}>Técnico: {h.tecnico}</div>
-                <div style={{ fontSize: 13, marginTop: 4 }}>{h.notas}</div>
-              </div>
-            ))}
-          </>
+        {!loading && tab === 'historial' && (
+          <div style={{ textAlign: 'center', color: 'var(--muted)', padding: '40px 0' }}>
+            <div style={{ fontSize: 28, marginBottom: 8 }}>📋</div>
+            <div style={{ fontSize: 13 }}>El historial de servicios aparecerá aquí.</div>
+          </div>
         )}
 
       </div>

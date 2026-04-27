@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useAuth } from '../../context/AuthContext'
 import BottomNav from '../../components/BottomNav'
+import { suscribirServiciosHoy, obtenerTecnicos } from '../../firebase/firestore'
 
 /* ── Icons ── */
 const IconChart = () => (
@@ -29,60 +30,94 @@ const TABS = [
   { id: 'eficiencia', label: 'Eficiencia', icon: <IconStar /> },
 ]
 
-const TECNICOS = [
-  {
-    id: 1,
-    nombre: 'Carlos V.',
-    servicios: 4,
-    completados: 3,
-    pendientes: 1,
-    eficiencia: 92,
-    tiempoMedio: '48 min',
-  },
-  {
-    id: 2,
-    nombre: 'Martín R.',
-    servicios: 3,
-    completados: 3,
-    pendientes: 0,
-    eficiencia: 100,
-    tiempoMedio: '41 min',
-  },
-  {
-    id: 3,
-    nombre: 'Diego F.',
-    servicios: 5,
-    completados: 2,
-    pendientes: 3,
-    eficiencia: 74,
-    tiempoMedio: '55 min',
-  },
-]
+function fechaHoy() {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
 
-const RUTAS = [
-  { id: 1, tecnico: 'Carlos V.',  zona: 'Cumbres · San Agustín',   total: 4, done: 3, status: 'activo' },
-  { id: 2, tecnico: 'Martín R.',  zona: 'Valle Oriente · San Pedro', total: 3, done: 3, status: 'completado' },
-  { id: 3, tecnico: 'Diego F.',   zona: 'Contry · Mitras Norte',    total: 5, done: 2, status: 'activo' },
-]
+/* Agrupa servicios por técnico y calcula métricas */
+function agruparPorTecnico(servicios, tecnicosMap) {
+  const grupos = {}
 
-const STATS = [
-  { label: 'Servicios hoy',  value: 12,   color: 'var(--accent)', sub: '3 técnicos activos' },
-  { label: 'Completados',    value: 8,    color: 'var(--green)',  sub: 'Meta: 12' },
-  { label: 'Pendientes',     value: 4,    color: 'var(--amber)', sub: 'En progreso' },
-  { label: 'Eficiencia',     value: '88%', color: 'var(--accent)', sub: '↑ 4% vs ayer' },
-]
+  servicios.forEach((s) => {
+    const id = s.tecnicoId ?? 'sin_asignar'
+    if (!grupos[id]) {
+      grupos[id] = {
+        id,
+        nombre: tecnicosMap[id]?.nombre ?? s.tecnicoNombre ?? id,
+        servicios: [],
+      }
+    }
+    grupos[id].servicios.push(s)
+  })
+
+  return Object.values(grupos).map((g) => {
+    const total       = g.servicios.length
+    const completados = g.servicios.filter((s) => s.status === 'completado').length
+    const eficiencia  = total > 0 ? Math.round((completados / total) * 100) : 0
+    return { ...g, total, completados, eficiencia }
+  })
+}
 
 export default function SupervisorDashboard() {
-  const [tab, setTab] = useState('resumen')
-  const { user, logout } = useAuth()
+  const [tab, setTab]           = useState('resumen')
+  const [servicios, setServicios] = useState([])
+  const [tecnicosMap, setTecnicosMap] = useState({})
+  const [loading, setLoading]   = useState(true)
+  const { user, logout }        = useAuth()
+
+  const hoy      = fechaHoy()
   const initials = (user?.email ?? 'SV').slice(0, 2).toUpperCase()
+
+  /* Carga técnicos una sola vez */
+  useEffect(() => {
+    obtenerTecnicos()
+      .then((lista) => {
+        const mapa = {}
+        lista.forEach((t) => { mapa[t.id] = t })
+        setTecnicosMap(mapa)
+      })
+      .catch(console.error)
+  }, [])
+
+  /* Suscripción en tiempo real a servicios del día */
+  useEffect(() => {
+    const unsub = suscribirServiciosHoy(hoy, (data) => {
+      setServicios(data)
+      setLoading(false)
+    })
+    return unsub
+  }, [hoy])
+
+  /* Estadísticas derivadas */
+  const total       = servicios.length
+  const completados = servicios.filter((s) => s.status === 'completado').length
+  const pendientes  = total - completados
+  const eficiencia  = total > 0 ? Math.round((completados / total) * 100) : 0
+  const tecnicoList = agruparPorTecnico(servicios, tecnicosMap)
+
+  const STATS = [
+    { label: 'Servicios hoy',  value: total,            color: 'var(--accent)', sub: `${Object.keys(tecnicosMap).length} técnicos` },
+    { label: 'Completados',    value: completados,      color: 'var(--green)',  sub: `Meta: ${total}` },
+    { label: 'Pendientes',     value: pendientes,       color: 'var(--amber)', sub: 'En progreso' },
+    { label: 'Eficiencia',     value: `${eficiencia}%`, color: 'var(--accent)', sub: 'del día' },
+  ]
+
+  const EmptyState = ({ icon, msg }) => (
+    <div className="card" style={{ textAlign: 'center', padding: '32px 16px' }}>
+      <div style={{ fontSize: 32, marginBottom: 10 }}>{icon}</div>
+      <div style={{ fontSize: 13, color: 'var(--muted)' }}>{msg}</div>
+    </div>
+  )
 
   return (
     <div className="screen">
       <header className="top-bar">
         <div>
           <div className="top-bar-title">Panel General</div>
-          <div className="top-bar-sub">Dom 26 Abr 2026 · AquaMTY</div>
+          <div className="top-bar-sub">
+            {loading ? 'Cargando...' : `${hoy} · ${total} servicios · tiempo real`}
+          </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <div className="avatar">{initials}</div>
@@ -105,75 +140,91 @@ export default function SupervisorDashboard() {
               ))}
             </div>
 
-            <div className="section-title" style={{ marginTop: 8 }}>Progreso global del día</div>
-            <div className="card">
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-                <span style={{ fontSize: 14 }}>8 de 12 servicios</span>
-                <span style={{ fontFamily: 'var(--font-heading)', fontWeight: 700, color: 'var(--green)' }}>67%</span>
-              </div>
-              <div className="progress-bar" style={{ height: 8, borderRadius: 4 }}>
-                <div className="progress-fill" style={{ width: '67%', background: 'var(--green)', borderRadius: 4 }} />
-              </div>
-            </div>
-
-            <div className="section-title">Estado por técnico</div>
-            {TECNICOS.map((t) => {
-              const pct = Math.round((t.completados / t.servicios) * 100)
-              return (
-                <div key={t.id} className="card" style={{ marginBottom: 10 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                      <div className="avatar">{t.nombre.slice(0, 2).toUpperCase()}</div>
-                      <div>
-                        <div style={{ fontWeight: 600, fontSize: 14 }}>{t.nombre}</div>
-                        <div style={{ fontSize: 12, color: 'var(--muted)' }}>{t.completados}/{t.servicios} servicios</div>
-                      </div>
-                    </div>
-                    <span className={`badge badge-${pct === 100 ? 'green' : pct >= 75 ? 'blue' : 'amber'}`}>
-                      {pct}%
+            {total > 0 && (
+              <>
+                <div className="section-title" style={{ marginTop: 8 }}>Progreso global del día</div>
+                <div className="card">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                    <span style={{ fontSize: 14 }}>{completados} de {total} servicios</span>
+                    <span style={{ fontFamily: 'var(--font-heading)', fontWeight: 700, color: 'var(--green)' }}>
+                      {eficiencia}%
                     </span>
                   </div>
-                  <div className="progress-bar">
-                    <div className="progress-fill" style={{ width: `${pct}%`, background: pct === 100 ? 'var(--green)' : 'var(--accent)' }} />
+                  <div className="progress-bar" style={{ height: 8, borderRadius: 4 }}>
+                    <div className="progress-fill" style={{ width: `${eficiencia}%`, background: 'var(--green)', borderRadius: 4 }} />
                   </div>
                 </div>
-              )
-            })}
+              </>
+            )}
+
+            <div className="section-title">Estado por técnico</div>
+            {loading ? (
+              <div style={{ textAlign: 'center', color: 'var(--muted)', padding: '20px 0', fontSize: 13 }}>Cargando...</div>
+            ) : tecnicoList.length === 0 ? (
+              <EmptyState icon="👷" msg="No hay servicios asignados hoy." />
+            ) : (
+              tecnicoList.map((t) => {
+                const pct = t.eficiencia
+                return (
+                  <div key={t.id} className="card" style={{ marginBottom: 10 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <div className="avatar">{t.nombre.slice(0, 2).toUpperCase()}</div>
+                        <div>
+                          <div style={{ fontWeight: 600, fontSize: 14 }}>{t.nombre}</div>
+                          <div style={{ fontSize: 12, color: 'var(--muted)' }}>{t.completados}/{t.total} servicios</div>
+                        </div>
+                      </div>
+                      <span className={`badge badge-${pct === 100 ? 'green' : pct >= 50 ? 'blue' : 'amber'}`}>
+                        {pct}%
+                      </span>
+                    </div>
+                    <div className="progress-bar">
+                      <div className="progress-fill" style={{
+                        width: `${pct}%`,
+                        background: pct === 100 ? 'var(--green)' : 'var(--accent)',
+                      }} />
+                    </div>
+                  </div>
+                )
+              })
+            )}
           </>
         )}
 
         {/* ── RUTAS ── */}
         {tab === 'rutas' && (
           <>
-            <div className="section-title">Rutas activas hoy</div>
-            {RUTAS.map((r) => (
-              <div key={r.id} className="card" style={{ marginBottom: 10 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
-                  <div>
-                    <div style={{ fontFamily: 'var(--font-heading)', fontWeight: 700, fontSize: 15 }}>{r.tecnico}</div>
-                    <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>{r.zona}</div>
-                  </div>
-                  <span className={`badge badge-${r.status === 'completado' ? 'green' : 'blue'}`}>
-                    {r.status === 'completado' ? 'Completado' : '● En ruta'}
-                  </span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8, fontSize: 13 }}>
-                  <span style={{ color: 'var(--muted)' }}>{r.done} de {r.total} servicios</span>
-                  <span style={{ color: 'var(--accent)', fontWeight: 600 }}>
-                    {Math.round((r.done / r.total) * 100)}%
-                  </span>
-                </div>
-                <div className="progress-bar">
-                  <div
-                    className="progress-fill"
-                    style={{
-                      width: `${(r.done / r.total) * 100}%`,
-                      background: r.status === 'completado' ? 'var(--green)' : 'var(--accent)',
-                    }}
-                  />
-                </div>
-              </div>
-            ))}
+            <div className="section-title">Servicios del día</div>
+            {loading ? (
+              <div style={{ textAlign: 'center', color: 'var(--muted)', padding: '20px 0', fontSize: 13 }}>Cargando...</div>
+            ) : servicios.length === 0 ? (
+              <EmptyState icon="🗺️" msg="No hay servicios registrados para hoy." />
+            ) : (
+              servicios
+                .slice()
+                .sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0))
+                .map((s) => {
+                  const tecNombre = tecnicosMap[s.tecnicoId]?.nombre ?? s.tecnicoNombre ?? s.tecnicoId
+                  return (
+                    <div key={s.id} className="card" style={{ marginBottom: 10 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
+                        <div>
+                          <div style={{ fontFamily: 'var(--font-heading)', fontWeight: 700, fontSize: 14 }}>{s.nombre}</div>
+                          <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>{s.direccion}</div>
+                          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 3 }}>Técnico: {tecNombre}</div>
+                        </div>
+                        <span className={`badge badge-${s.status === 'completado' ? 'green' : s.status === 'activo' ? 'blue' : 'muted'}`}>
+                          {s.status === 'completado' ? 'Completado' : s.status === 'activo' ? '● Activo' : 'Pendiente'}
+                        </span>
+                      </div>
+                      {s.hora && (
+                        <div style={{ fontSize: 11, color: 'var(--muted)' }}>📍 {s.hora}</div>
+                      )}
+                    </div>
+                  )
+                })
+            )}
           </>
         )}
 
@@ -181,53 +232,71 @@ export default function SupervisorDashboard() {
         {tab === 'eficiencia' && (
           <>
             <div className="section-title">Rendimiento por técnico</div>
-            {TECNICOS.map((t) => (
-              <div key={t.id} className="card" style={{ marginBottom: 10 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <div className="avatar">{t.nombre.slice(0, 2).toUpperCase()}</div>
-                    <span style={{ fontWeight: 600 }}>{t.nombre}</span>
-                  </div>
-                  <span
-                    className={`badge badge-${t.eficiencia === 100 ? 'green' : t.eficiencia >= 85 ? 'blue' : 'amber'}`}
-                    style={{ fontFamily: 'var(--font-heading)', fontSize: 13 }}
-                  >
-                    {t.eficiencia}%
-                  </span>
-                </div>
-
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginBottom: 12 }}>
-                  {[
-                    { label: 'Asignados', val: t.servicios, color: 'var(--text)' },
-                    { label: 'Completados', val: t.completados, color: 'var(--green)' },
-                    { label: 'Tiempo medio', val: t.tiempoMedio, color: 'var(--accent)' },
-                  ].map((item) => (
-                    <div key={item.label} style={{ textAlign: 'center', background: 'var(--surface2)', borderRadius: 8, padding: '10px 6px', border: '1px solid var(--border)' }}>
-                      <div style={{ fontFamily: 'var(--font-heading)', fontWeight: 700, fontSize: 18, color: item.color }}>{item.val}</div>
-                      <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 3, textTransform: 'uppercase', letterSpacing: '0.4px' }}>{item.label}</div>
+            {loading ? (
+              <div style={{ textAlign: 'center', color: 'var(--muted)', padding: '20px 0', fontSize: 13 }}>Cargando...</div>
+            ) : tecnicoList.length === 0 ? (
+              <EmptyState icon="📊" msg="Sin datos de rendimiento para hoy." />
+            ) : (
+              tecnicoList.map((t) => (
+                <div key={t.id} className="card" style={{ marginBottom: 10 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <div className="avatar">{t.nombre.slice(0, 2).toUpperCase()}</div>
+                      <span style={{ fontWeight: 600 }}>{t.nombre}</span>
                     </div>
-                  ))}
-                </div>
+                    <span
+                      className={`badge badge-${t.eficiencia === 100 ? 'green' : t.eficiencia >= 50 ? 'blue' : 'amber'}`}
+                      style={{ fontFamily: 'var(--font-heading)', fontSize: 13 }}
+                    >
+                      {t.eficiencia}%
+                    </span>
+                  </div>
 
-                <div className="progress-bar" style={{ height: 6, borderRadius: 3 }}>
-                  <div
-                    className="progress-fill"
-                    style={{
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginBottom: 12 }}>
+                    {[
+                      { label: 'Asignados',    val: t.total,       color: 'var(--text)' },
+                      { label: 'Completados',  val: t.completados, color: 'var(--green)' },
+                      { label: 'Pendientes',   val: t.total - t.completados, color: 'var(--amber)' },
+                    ].map((item) => (
+                      <div key={item.label} style={{
+                        textAlign: 'center', background: 'var(--surface2)',
+                        borderRadius: 8, padding: '10px 6px', border: '1px solid var(--border)',
+                      }}>
+                        <div style={{ fontFamily: 'var(--font-heading)', fontWeight: 700, fontSize: 20, color: item.color }}>
+                          {item.val}
+                        </div>
+                        <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 3, textTransform: 'uppercase', letterSpacing: '0.4px' }}>
+                          {item.label}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="progress-bar" style={{ height: 6, borderRadius: 3 }}>
+                    <div className="progress-fill" style={{
                       width: `${t.eficiencia}%`,
-                      background: t.eficiencia === 100 ? 'var(--green)' : t.eficiencia >= 85 ? 'var(--accent)' : 'var(--amber)',
+                      background: t.eficiencia === 100 ? 'var(--green)' : t.eficiencia >= 50 ? 'var(--accent)' : 'var(--amber)',
                       borderRadius: 3,
-                    }}
-                  />
+                    }} />
+                  </div>
                 </div>
-              </div>
-            ))}
+              ))
+            )}
 
-            <div className="section-title" style={{ marginTop: 8 }}>Promedio del equipo</div>
-            <div className="card" style={{ textAlign: 'center' }}>
-              <div style={{ fontFamily: 'var(--font-heading)', fontWeight: 800, fontSize: 48, color: 'var(--accent)', lineHeight: 1 }}>88%</div>
-              <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 6 }}>Eficiencia global · Hoy</div>
-              <div style={{ fontSize: 12, color: 'var(--green)', marginTop: 4 }}>↑ 4% vs ayer</div>
-            </div>
+            {tecnicoList.length > 0 && (
+              <>
+                <div className="section-title" style={{ marginTop: 8 }}>Promedio del equipo</div>
+                <div className="card" style={{ textAlign: 'center' }}>
+                  <div style={{ fontFamily: 'var(--font-heading)', fontWeight: 800, fontSize: 52, color: 'var(--accent)', lineHeight: 1 }}>
+                    {eficiencia}%
+                  </div>
+                  <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 6 }}>Eficiencia global · Hoy</div>
+                  <div style={{ fontSize: 12, color: 'var(--green)', marginTop: 4 }}>
+                    {completados} de {total} servicios completados
+                  </div>
+                </div>
+              </>
+            )}
           </>
         )}
 
