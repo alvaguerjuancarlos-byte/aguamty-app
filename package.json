@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "seed": "node src/firebase/seed.js",
     "create-users": "node src/firebase/createUsers.js",
-    "seed-users": "node src/firebase/seedUsers.js"
+    "seed-users": "node src/firebase/seedUsers.js",
+    "seed-data": "node src/firebase/seedData.js"
   },
   "dependencies": {
     "firebase": "^12.12.1",
