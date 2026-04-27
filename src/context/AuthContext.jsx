@@ -34,6 +34,7 @@ export function AuthProvider({ children }) {
     const cred = await signInWithEmailAndPassword(auth, email, password);
     const snap = await getDoc(doc(db, "usuarios", cred.user.uid));
     const data = snap.exists() ? snap.data() : {};
+    setUser(cred.user);
     setRol(data.rol ?? null);
     return { user: cred.user, rol: data.rol ?? null };
   }
