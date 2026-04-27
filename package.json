@@ -8,7 +8,8 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "seed": "node src/firebase/seed.js"
+    "seed": "node src/firebase/seed.js",
+    "create-users": "node src/firebase/createUsers.js"
   },
   "dependencies": {
     "firebase": "^12.12.1",
