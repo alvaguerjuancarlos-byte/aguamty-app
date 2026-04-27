@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useAuth } from '../../context/AuthContext'
 import BottomNav from '../../components/BottomNav'
-import { obtenerRuta, actualizarPaso, actualizarEstadoServicio } from '../../firebase/firestore'
+import { obtenerRuta, actualizarPaso, actualizarEstadoServicio, guardarUbicacion } from '../../firebase/firestore'
 
 /* ── Icons ── */
 const IconMap = () => (
@@ -73,12 +73,39 @@ export default function TecnicoDashboard() {
   const [loading, setLoading] = useState(true)
   const [guardando, setGuardando] = useState(false)
   const { user, logout }    = useAuth()
+  const rutaRef             = useRef(ruta)
 
   const hoy     = fechaHoy()
   const activo  = ruta.find((r) => r.status === 'activo') ?? ruta.find((r) => r.status === 'pendiente') ?? null
   const completados = pasos.filter((p) => p.done).length
   const progreso    = pasos.length > 0 ? Math.round((completados / pasos.length) * 100) : 0
   const initials    = (user?.email ?? 'TC').slice(0, 2).toUpperCase()
+
+  // Keep ref current so the geolocation interval always reads latest ruta
+  useEffect(() => { rutaRef.current = ruta }, [ruta])
+
+  /* Geolocation — reports position to Firestore every 2 minutes */
+  useEffect(() => {
+    if (!user?.uid || !navigator.geolocation) return
+
+    function enviarUbicacion() {
+      navigator.geolocation.getCurrentPosition(
+        ({ coords }) => {
+          const r = rutaRef.current
+          const hayActivo   = r.some((s) => s.status === 'activo')
+          const hayPendiente = r.some((s) => s.status === 'pendiente')
+          const status = hayActivo ? 'en_ruta' : hayPendiente ? 'pendiente' : 'en_ruta'
+          guardarUbicacion(user.uid, { lat: coords.latitude, lng: coords.longitude, status }).catch(() => {})
+        },
+        () => {},
+        { enableHighAccuracy: true, timeout: 10000 }
+      )
+    }
+
+    enviarUbicacion()
+    const id = setInterval(enviarUbicacion, 2 * 60 * 1000)
+    return () => clearInterval(id)
+  }, [user?.uid])
 
   /* Carga ruta del día */
   useEffect(() => {

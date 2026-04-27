@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useAuth } from '../../context/AuthContext'
 import BottomNav from '../../components/BottomNav'
 import { suscribirServiciosHoy, obtenerTecnicos } from '../../firebase/firestore'
 import AdminPanel from './AdminPanel'
+import MapTab from './MapTab'
 
 /* ── Icons ── */
 const IconChart = () => (
@@ -32,11 +33,18 @@ const IconAdmin = () => (
     <line x1="15" y1="5" x2="21" y2="5" />
   </svg>
 )
+const IconMapPin = () => (
+  <svg viewBox="0 0 24 24">
+    <path d="M21 10c0 7-9 13-9 13S3 17 3 10a9 9 0 0 1 18 0z" />
+    <circle cx="12" cy="10" r="3" />
+  </svg>
+)
 
 const TABS = [
   { id: 'resumen',    label: 'Resumen',    icon: <IconChart /> },
   { id: 'rutas',      label: 'Rutas',      icon: <IconRoutes /> },
   { id: 'eficiencia', label: 'Eficiencia', icon: <IconStar /> },
+  { id: 'mapa',       label: 'Mapa',       icon: <IconMapPin /> },
   { id: 'admin',      label: 'Admin',      icon: <IconAdmin /> },
 ]
 
@@ -105,6 +113,22 @@ export default function SupervisorDashboard() {
   const pendientes  = total - completados
   const eficiencia  = total > 0 ? Math.round((completados / total) * 100) : 0
   const tecnicoList = agruparPorTecnico(servicios, tecnicosMap)
+
+  // Stats per technician keyed by uid — passed to MapTab for popup info
+  const tecnicoStats = useMemo(() => {
+    const map = {}
+    tecnicoList.forEach((t) => {
+      const ultimo = [...t.servicios]
+        .filter((s) => s.status === 'completado')
+        .sort((a, b) => (b.orden ?? 0) - (a.orden ?? 0))[0]
+      map[t.id] = {
+        completados: t.completados,
+        total: t.total,
+        ultimoNombre: ultimo?.nombre ?? null,
+      }
+    })
+    return map
+  }, [tecnicoList])
 
   const STATS = [
     { label: 'Servicios hoy',  value: total,            color: 'var(--accent)', sub: `${Object.keys(tecnicosMap).length} técnicos` },
@@ -236,6 +260,11 @@ export default function SupervisorDashboard() {
                 })
             )}
           </>
+        )}
+
+        {/* ── MAPA ── */}
+        {tab === 'mapa' && (
+          <MapTab tecnicosMap={tecnicosMap} tecnicoStats={tecnicoStats} />
         )}
 
         {/* ── ADMIN ── */}

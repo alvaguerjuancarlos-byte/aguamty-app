@@ -4,6 +4,7 @@ import {
   getDocs,
   getDoc,
   doc,
+  setDoc,
   updateDoc,
   query,
   where,
@@ -77,4 +78,24 @@ export async function obtenerUltimaMedicion(albercaId) {
   const snap = await getDocs(q)
   if (snap.empty) return null
   return { id: snap.docs[0].id, ...snap.docs[0].data() }
+}
+
+// ── Ubicaciones ───────────────────────────────────────────────────────────────
+
+export async function guardarUbicacion(tecnicoId, { lat, lng, status }) {
+  return setDoc(doc(db, 'ubicaciones', tecnicoId), {
+    lat,
+    lng,
+    status: status ?? 'en_ruta',
+    timestamp: serverTimestamp(),
+  })
+}
+
+// Real-time listener for all technician locations — returns unsubscribe fn
+export function suscribirUbicaciones(onUpdate) {
+  return onSnapshot(collection(db, 'ubicaciones'), (snap) => {
+    const data = {}
+    snap.docs.forEach((d) => { data[d.id] = { id: d.id, ...d.data() } })
+    onUpdate(data)
+  })
 }
